@@ -6,6 +6,8 @@
 (define-constant ERR-ALREADY-REGISTERED (err u101))
 (define-constant ERR-NOT-FOUND (err u102))
 (define-constant ERR-INSUFFICIENT-FUNDS (err u103))
+(define-constant ERR-BENEFICIARY-NOT-FOUND (err u104))
+(define-constant ERR-UTILIZATION-NOT-FOUND (err u105))
 
 ;; Define constants for roles
 (define-constant ROLE-ADMIN u1)
@@ -15,8 +17,8 @@
 ;; Define data maps
 (define-map roles { user: principal } { role: uint })
 
-(define-map beneficiaries 
-  { id: uint } 
+(define-map beneficiaries
+  { id: uint }
   { name: (string-ascii 50), description: (string-ascii 255), target-amount: uint, received-amount: uint, status: (string-ascii 20) })
 
 (define-map donations
@@ -45,19 +47,19 @@
 ;; Role management functions
 (define-public (set-role (user principal) (new-role uint))
   (begin
-    (asserts! (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err "Only the contract owner can set roles"))
     (ok (map-set roles { user: user } { role: new-role }))))
 
 (define-public (remove-role (user principal))
   (begin
-    (asserts! (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
+    (asserts! (is-eq tx-sender (var-get contract-owner)) (err "Only the contract owner can remove roles"))
     (ok (map-delete roles { user: user }))))
 
 ;; Main functions
 (define-public (register-beneficiary (name (string-ascii 50)) (description (string-ascii 255)) (target-amount uint))
   (let ((beneficiary-id (+ (var-get beneficiary-count) u1)))
-    (asserts! (is-authorized tx-sender ROLE-MODERATOR) ERR-NOT-AUTHORIZED)
-    (map-insert beneficiaries 
+    (asserts! (is-authorized tx-sender ROLE-MODERATOR) (err "Only moderators can register beneficiaries"))
+    (map-insert beneficiaries
       { id: beneficiary-id }
       { name: name, description: description, target-amount: target-amount, received-amount: u0, status: "active" })
     (var-set beneficiary-count beneficiary-id)
@@ -66,13 +68,13 @@
 (define-read-only (get-beneficiary (id uint))
   (match (map-get? beneficiaries { id: id })
     beneficiary (ok beneficiary)
-    (err ERR-NOT-FOUND)))
+    (err ERR-BENEFICIARY-NOT-FOUND)))
 
 (define-public (donate (beneficiary-id uint) (amount uint))
-  (let ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-NOT-FOUND))
+  (let ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
         (new-received-amount (+ (get received-amount beneficiary) amount)))
     (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-    (map-set beneficiaries 
+    (map-set beneficiaries
       { id: beneficiary-id }
       (merge beneficiary { received-amount: new-received-amount }))
     (map-insert donations
@@ -81,19 +83,19 @@
     (ok true)))
 
 (define-public (add-utilization (beneficiary-id uint) (description (string-ascii 255)) (amount uint))
-  (let ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-NOT-FOUND))
+  (let ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
         (milestone (+ (default-to u0 (get-last-milestone beneficiary-id)) u1)))
-    (asserts! (is-authorized tx-sender ROLE_ADMIN) ERR-NOT-AUTHORIZED)
+    (asserts! (is-authorized tx-sender ROLE_ADMIN) (err "Only admins can add utilization"))
     (map-insert utilization
       { beneficiary-id: beneficiary-id, milestone: milestone }
       { description: description, amount: amount, status: "pending" })
     (ok milestone)))
 
 (define-public (approve-utilization (beneficiary-id uint) (milestone uint))
-  (let ((utilization-entry (unwrap! (map-get? utilization { beneficiary-id: beneficiary-id, milestone: milestone }) ERR-NOT-FOUND))
-        (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-NOT-FOUND)))
-    (asserts! (is-authorized tx-sender ROLE_ADMIN) ERR-NOT-AUTHORIZED)
-    (asserts! (<= (get amount utilization-entry) (get received-amount beneficiary)) ERR-INSUFFICIENT-FUNDS)
+  (let ((utilization-entry (unwrap! (map-get? utilization { beneficiary-id: beneficiary-id, milestone: milestone }) ERR-UTILIZATION-NOT-FOUND))
+        (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
+    (asserts! (is-authorized tx-sender ROLE_ADMIN) (err "Only admins can approve utilization"))
+    (asserts! (<= (get amount utilization-entry) (get received-amount beneficiary)) (err "Insufficient funds to approve utilization"))
     (map-set utilization
       { beneficiary-id: beneficiary-id, milestone: milestone }
       (merge utilization-entry { status: "approved" }))
@@ -112,3 +114,4 @@
     (var-set contract-owner tx-sender)))
 
 (initialize-contract)
+
