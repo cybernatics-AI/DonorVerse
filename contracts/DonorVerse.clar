@@ -1,4 +1,3 @@
-
 ;; Define the contract
 (define-data-var contract-owner principal tx-sender)
 
@@ -17,18 +16,9 @@
 
 ;; Define data maps
 (define-map roles { user: principal } { role: uint })
-
-(define-map beneficiaries
-  { id: uint }
-  { name: (string-ascii 50), description: (string-ascii 255), target-amount: uint, received-amount: uint, status: (string-ascii 20) })
-
-(define-map donations
-  { id: uint }
-  { donor: principal, beneficiary-id: uint, amount: uint, timestamp: uint })
-
-(define-map utilization
-  { id: uint }
-  { beneficiary-id: uint, milestone: uint, description: (string-ascii 255), amount: uint, status: (string-ascii 20) })
+(define-map beneficiaries { id: uint } { name: (string-ascii 50), description: (string-ascii 255), target-amount: uint, received-amount: uint, status: (string-ascii 20) })
+(define-map donations { id: uint } { donor: principal, beneficiary-id: uint, amount: uint, timestamp: uint })
+(define-map utilization { id: uint } { beneficiary-id: uint, milestone: uint, description: (string-ascii 255), amount: uint, status: (string-ascii 20) })
 
 ;; Define data variables
 (define-data-var beneficiary-count uint u0)
@@ -42,9 +32,9 @@
     false))
 
 (define-private (get-last-milestone (beneficiary-id uint))
-  (fold + (map get-milestone (get-utilization beneficiary-id)) u0))
+  (fold + (map get-milestone (filter (lambda (util) (is-eq (get beneficiary-id util) beneficiary-id)) (range u1 (var-get utilization-count)))) u0))
 
-(define-private (get-milestone (util { id: uint }))
+(define-private (get-milestone (util { id: uint, beneficiary-id: uint, milestone: uint }))
   (get milestone util))
 
 ;; Role management functions
@@ -89,9 +79,9 @@
 
 (define-public (add-utilization (beneficiary-id uint) (description (string-ascii 255)) (amount uint))
   (let ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
-        (milestone (+ (default-to u0 (get-last-milestone beneficiary-id)) u1))
+        (milestone (+ (get-last-milestone beneficiary-id) u1))
         (utilization-id (+ (var-get utilization-count) u1)))
-    (asserts! (is-authorized tx-sender ROLE_ADMIN) (err "Only admins can add utilization"))
+    (asserts! (is-authorized tx-sender ROLE-ADMIN) (err "Only admins can add utilization"))
     (map-insert utilization
       { id: utilization-id }
       { beneficiary-id: beneficiary-id, milestone: milestone, description: description, amount: amount, status: "pending" })
@@ -101,7 +91,7 @@
 (define-public (approve-utilization (beneficiary-id uint) (milestone uint))
   (let ((utilization-entry (unwrap! (map-get? utilization { id: milestone }) ERR-UTILIZATION-NOT-FOUND))
         (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
-    (asserts! (is-authorized tx-sender ROLE_ADMIN) (err "Only admins can approve utilization"))
+    (asserts! (is-authorized tx-sender ROLE-ADMIN) (err "Only admins can approve utilization"))
     (asserts! (<= (get amount utilization-entry) (get received-amount beneficiary)) (err "Insufficient funds to approve utilization"))
     (map-set utilization
       { id: milestone }
@@ -109,21 +99,21 @@
     (ok true)))
 
 (define-read-only (get-donations (beneficiary-id uint))
-  (map
+  (filter
     (lambda (donation)
-      (get donation (unwrap! (map-get? donations { id: donation }) (err "Donation not found"))))
-    (filter
-      (lambda (donation)
-        (is-eq (get beneficiary-id (unwrap! (map-get? donations { id: donation }) (err "Donation not found"))) beneficiary-id))
+      (is-eq (get beneficiary-id donation) beneficiary-id))
+    (map
+      (lambda (id)
+        (unwrap! (map-get? donations { id: id }) (err "Donation not found")))
       (range u1 (var-get donation-count)))))
 
 (define-read-only (get-utilization (beneficiary-id uint))
-  (map
+  (filter
     (lambda (util)
-      (get util (unwrap! (map-get? utilization { id: util }) (err "Utilization not found"))))
-    (filter
-      (lambda (util)
-        (is-eq (get beneficiary-id (unwrap! (map-get? utilization { id: util }) (err "Utilization not found"))) beneficiary-id))
+      (is-eq (get beneficiary-id util) beneficiary-id))
+    (map
+      (lambda (id)
+        (unwrap! (map-get? utilization { id: id }) (err "Utilization not found")))
       (range u1 (var-get utilization-count)))))
 
 ;; Contract initialization
