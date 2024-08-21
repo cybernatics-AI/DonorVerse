@@ -32,9 +32,10 @@
     false))
 
 (define-private (get-last-milestone (beneficiary-id uint))
-  (fold + (map get-milestone (filter (lambda (util) (is-eq (get beneficiary-id util) beneficiary-id)) (range u1 (var-get utilization-count)))) u0))
+  (let ((utilization-entries (filter (lambda (util) (is-eq (get beneficiary-id util) beneficiary-id)) (map (lambda (id) (unwrap! (map-get? utilization { id: id }) (err "Utilization not found"))) (range u1 (var-get utilization-count))))))
+    (fold + (map (lambda (util) (get milestone util)) utilization-entries) u0)))
 
-(define-private (get-milestone (util { id: uint, beneficiary-id: uint, milestone: uint }))
+(define-private (get-milestone (util { beneficiary-id: uint, milestone: uint }))
   (get milestone util))
 
 ;; Role management functions
