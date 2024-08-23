@@ -59,32 +59,33 @@
 
 ;; Role management functions
 (define-public (set-role (user principal) (new-role uint))
-  (begin
-    (assert (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
-    (ok (map-set roles { user: user } { role: new-role }))))
+  (if (is-eq tx-sender (var-get contract-owner))
+      (ok (map-set roles { user: user } { role: new-role }))
+      ERR-NOT-AUTHORIZED))
 
 (define-public (remove-role (user principal))
-  (begin
-    (assert (is-eq tx-sender (var-get contract-owner)) ERR-NOT-AUTHORIZED)
-    (ok (map-delete roles { user: user }))))
+  (if (is-eq tx-sender (var-get contract-owner))
+      (ok (map-delete roles { user: user }))
+      ERR-NOT-AUTHORIZED))
 
 ;; Main functions
 (define-public (register-beneficiary (name (string-utf8 50)) (description (string-utf8 255)) (target-amount uint))
   (let 
     ((beneficiary-id (+ (var-get beneficiary-count) u1)))
-    (begin
-      (assert (is-authorized tx-sender ROLE-MODERATOR) ERR-NOT-AUTHORIZED)
-      (map-set beneficiaries
-        { id: beneficiary-id }
-        { 
-          name: name, 
-          description: description, 
-          target-amount: target-amount, 
-          received-amount: u0, 
-          status: "active" 
-        })
-      (var-set beneficiary-count beneficiary-id)
-      (ok beneficiary-id))))
+    (if (is-authorized tx-sender ROLE-MODERATOR)
+        (begin
+          (map-set beneficiaries
+            { id: beneficiary-id }
+            { 
+              name: name, 
+              description: description, 
+              target-amount: target-amount, 
+              received-amount: u0, 
+              status: "active" 
+            })
+          (var-set beneficiary-count beneficiary-id)
+          (ok beneficiary-id))
+        ERR-NOT-AUTHORIZED)))
 
 (define-read-only (get-beneficiary (id uint))
   (match (map-get? beneficiaries { id: id })
@@ -96,47 +97,51 @@
     ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
      (new-received-amount (+ (get received-amount beneficiary) amount))
      (donation-id (+ (var-get donation-count) u1)))
-    (begin
-      (try! (stx-transfer? amount tx-sender (as-contract tx-sender)))
-      (map-set beneficiaries
-        { id: beneficiary-id }
-        (merge beneficiary { received-amount: new-received-amount }))
-      (map-set donations
-        { id: donation-id }
-        { donor: tx-sender, beneficiary-id: beneficiary-id, amount: amount, timestamp: block-height })
-      (var-set donation-count donation-id)
-      (ok true))))
+    (match (stx-transfer? amount tx-sender (as-contract tx-sender))
+      success (begin
+        (map-set beneficiaries
+          { id: beneficiary-id }
+          (merge beneficiary { received-amount: new-received-amount }))
+        (map-set donations
+          { id: donation-id }
+          { donor: tx-sender, beneficiary-id: beneficiary-id, amount: amount, timestamp: block-height })
+        (var-set donation-count donation-id)
+        (ok true))
+      error ERR-INSUFFICIENT-FUNDS)))
 
 (define-public (add-utilization (beneficiary-id uint) (description (string-utf8 255)) (amount uint))
   (let 
     ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
      (milestone (+ (get-last-milestone beneficiary-id) u1))
      (utilization-id (+ (var-get utilization-count) u1)))
-    (begin
-      (assert (is-authorized tx-sender ROLE-ADMIN) ERR-NOT-AUTHORIZED)
-      (map-set utilization
-        { id: utilization-id }
-        { 
-          beneficiary-id: beneficiary-id, 
-          milestone: milestone, 
-          description: description, 
-          amount: amount, 
-          status: "pending" 
-        })
-      (var-set utilization-count utilization-id)
-      (ok milestone))))
+    (if (is-authorized tx-sender ROLE-ADMIN)
+        (begin
+          (map-set utilization
+            { id: utilization-id }
+            { 
+              beneficiary-id: beneficiary-id, 
+              milestone: milestone, 
+              description: description, 
+              amount: amount, 
+              status: "pending" 
+            })
+          (var-set utilization-count utilization-id)
+          (ok milestone))
+        ERR-NOT-AUTHORIZED)))
 
 (define-public (approve-utilization (beneficiary-id uint) (milestone uint))
   (let 
     ((utilization-entry (unwrap! (map-get? utilization { id: milestone }) ERR-UTILIZATION-NOT-FOUND))
      (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
-    (begin
-      (assert (is-authorized tx-sender ROLE-ADMIN) ERR-NOT-AUTHORIZED)
-      (assert (<= (get amount utilization-entry) (get received-amount beneficiary)) ERR-INSUFFICIENT-FUNDS)
-      (map-set utilization
-        { id: milestone }
-        (merge utilization-entry { status: "approved" }))
-      (ok true))))
+    (if (is-authorized tx-sender ROLE-ADMIN)
+        (if (<= (get amount utilization-entry) (get received-amount beneficiary))
+            (begin
+              (map-set utilization
+                { id: milestone }
+                (merge utilization-entry { status: "approved" }))
+              (ok true))
+            ERR-INSUFFICIENT-FUNDS)
+        ERR-NOT-AUTHORIZED)))
 
 ;; Helper function to check if a donation belongs to a beneficiary
 (define-private (donation-belongs-to-beneficiary? (donation { donor: principal, beneficiary-id: uint, amount: uint, timestamp: uint }) (target-beneficiary-id uint))
