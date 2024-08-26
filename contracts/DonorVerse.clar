@@ -8,6 +8,7 @@
 (define-constant ERR-INSUFFICIENT-FUNDS (err u103))
 (define-constant ERR-BENEFICIARY-NOT-FOUND (err u104))
 (define-constant ERR-UTILIZATION-NOT-FOUND (err u105))
+(define-constant ERR-INVALID-INPUT (err u106))
 
 ;; Define constants for roles
 (define-constant ROLE-ADMIN u1)
@@ -56,7 +57,8 @@
 
 ;; Role management functions
 (define-public (set-role (user principal) (new-role uint))
-  (if (is-eq tx-sender (var-get contract-owner))
+  (if (and (is-eq tx-sender (var-get contract-owner))
+           (<= new-role ROLE-BENEFICIARY))
       (ok (map-set roles { user: user } { role: new-role }))
       ERR-NOT-AUTHORIZED))
 
@@ -69,7 +71,10 @@
 (define-public (register-beneficiary (name (string-utf8 50)) (description (string-utf8 255)) (target-amount uint))
   (let 
     ((beneficiary-id (+ (var-get beneficiary-count) u1)))
-    (if (is-authorized tx-sender ROLE-MODERATOR)
+    (if (and (is-authorized tx-sender ROLE-MODERATOR)
+             (> (len name) u0)
+             (> (len description) u0)
+             (> target-amount u0))
         (begin
           (map-set beneficiaries
             { id: beneficiary-id }
@@ -82,7 +87,7 @@
             })
           (var-set beneficiary-count beneficiary-id)
           (ok beneficiary-id))
-        ERR-NOT-AUTHORIZED)))
+        ERR-INVALID-INPUT)))
 
 (define-read-only (get-beneficiary (id uint))
   (match (map-get? beneficiaries { id: id })
@@ -91,27 +96,29 @@
 
 (define-public (donate (beneficiary-id uint) (amount uint))
   (let 
-    ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
-     (new-received-amount (+ (get received-amount beneficiary) amount))
-     (donation-id (+ (var-get donation-count) u1)))
-    (match (stx-transfer? amount tx-sender (as-contract tx-sender))
-      success (begin
-        (map-set beneficiaries
-          { id: beneficiary-id }
-          (merge beneficiary { received-amount: new-received-amount }))
-        (map-set donations
-          { id: donation-id }
-          { donor: tx-sender, beneficiary-id: beneficiary-id, amount: amount, timestamp: block-height })
-        (var-set donation-count donation-id)
-        (ok true))
-      error ERR-INSUFFICIENT-FUNDS)))
+    ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
+    (if (> amount u0)
+        (match (stx-transfer? amount tx-sender (as-contract tx-sender))
+          success (begin
+            (map-set beneficiaries
+              { id: beneficiary-id }
+              (merge beneficiary { received-amount: (+ (get received-amount beneficiary) amount) }))
+            (map-set donations
+              { id: (+ (var-get donation-count) u1) }
+              { donor: tx-sender, beneficiary-id: beneficiary-id, amount: amount, timestamp: block-height })
+            (var-set donation-count (+ (var-get donation-count) u1))
+            (ok true))
+          error ERR-INSUFFICIENT-FUNDS)
+        ERR-INVALID-INPUT)))
 
 (define-public (add-utilization (beneficiary-id uint) (description (string-utf8 255)) (amount uint))
   (let 
     ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
      (milestone (+ (get-last-milestone beneficiary-id) u1))
      (utilization-id (+ (var-get utilization-count) u1)))
-    (if (is-authorized tx-sender ROLE-ADMIN)
+    (if (and (is-authorized tx-sender ROLE-ADMIN)
+             (> (len description) u0)
+             (> amount u0))
         (begin
           (map-set utilization
             { id: utilization-id }
@@ -124,13 +131,14 @@
             })
           (var-set utilization-count utilization-id)
           (ok milestone))
-        ERR-NOT-AUTHORIZED)))
+        ERR-INVALID-INPUT)))
 
 (define-public (approve-utilization (beneficiary-id uint) (milestone uint))
   (let 
     ((utilization-entry (unwrap! (map-get? utilization { id: milestone }) ERR-UTILIZATION-NOT-FOUND))
      (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
-    (if (is-authorized tx-sender ROLE-ADMIN)
+    (if (and (is-authorized tx-sender ROLE-ADMIN)
+             (is-eq (get beneficiary-id utilization-entry) beneficiary-id))
         (if (<= (get amount utilization-entry) (get received-amount beneficiary))
             (begin
               (map-set utilization
