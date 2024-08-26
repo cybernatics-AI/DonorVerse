@@ -143,35 +143,49 @@
             ERR-INSUFFICIENT-FUNDS)
         ERR-NOT-AUTHORIZED)))
 
-;; Helper function to check if a donation belongs to a beneficiary
-(define-private (donation-belongs-to-beneficiary? (donation { donor: principal, beneficiary-id: uint, amount: uint, timestamp: uint }) (target-beneficiary-id uint))
-  (is-eq (get beneficiary-id donation) target-beneficiary-id))
-
-;; Get donations for a specific beneficiary
-(define-read-only (get-donations (beneficiary-id uint))
-  (let ((all-donations (map get-donation (sequence u1 (var-get donation-count)))))
-    (filter donation-belongs-to-beneficiary? all-donations beneficiary-id)))
-
 ;; Helper function to get a donation by ID
 (define-private (get-donation (id uint))
   (default-to 
     { donor: tx-sender, beneficiary-id: u0, amount: u0, timestamp: u0 }
     (map-get? donations { id: id })))
 
-;; Helper function to check if a utilization entry belongs to a beneficiary
-(define-private (utilization-belongs-to-beneficiary? (util { beneficiary-id: uint, milestone: uint, description: (string-utf8 255), amount: uint, status: (string-ascii 20) }) (target-beneficiary-id uint))
-  (is-eq (get beneficiary-id util) target-beneficiary-id))
+;; Helper function to get donations for a specific beneficiary
+(define-private (get-donations-helper (beneficiary-id uint) (current-id uint) (max-id uint) (result (list 256 { donor: principal, beneficiary-id: uint, amount: uint, timestamp: uint })))
+  (if (> current-id max-id)
+      result
+      (let 
+        ((donation (get-donation current-id))
+         (updated-result (if (is-eq (get beneficiary-id donation) beneficiary-id)
+                           (append result donation)
+                           result)))
+        (get-donations-helper beneficiary-id (+ current-id u1) max-id updated-result))))
 
-;; Get utilization entries for a specific beneficiary
-(define-read-only (get-utilization (beneficiary-id uint))
-  (let ((all-utilizations (map get-utilization-entry (sequence u1 (var-get utilization-count)))))
-    (filter utilization-belongs-to-beneficiary? all-utilizations beneficiary-id)))
+;; Get donations for a specific beneficiary
+(define-read-only (get-donations (beneficiary-id uint))
+  (let ((result (list)))
+    (ok (get-donations-helper beneficiary-id u1 (var-get donation-count) result))))
 
 ;; Helper function to get a utilization entry by ID
 (define-private (get-utilization-entry (id uint))
   (default-to 
     { beneficiary-id: u0, milestone: u0, description: "", amount: u0, status: "" }
     (map-get? utilization { id: id })))
+
+;; Helper function to get utilization entries for a specific beneficiary
+(define-private (get-utilization-helper (beneficiary-id uint) (current-id uint) (max-id uint) (result (list 256 { beneficiary-id: uint, milestone: uint, description: (string-utf8 255), amount: uint, status: (string-ascii 20) })))
+  (if (> current-id max-id)
+      result
+      (let 
+        ((util (get-utilization-entry current-id))
+         (updated-result (if (is-eq (get beneficiary-id util) beneficiary-id)
+                            (append result util)
+                            result)))
+        (get-utilization-helper beneficiary-id (+ current-id u1) max-id updated-result))))
+
+;; Get utilization entries for a specific beneficiary
+(define-read-only (get-utilization (beneficiary-id uint))
+  (let ((result (list)))
+    (ok (get-utilization-helper beneficiary-id u1 (var-get utilization-count) result))))
 
 ;; Contract initialization
 (define-private (initialize-contract)
