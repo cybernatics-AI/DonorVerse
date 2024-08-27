@@ -57,13 +57,22 @@
 
 ;; Role management functions
 (define-public (set-role (user principal) (new-role uint))
-  (if (and (is-eq tx-sender (var-get contract-owner))
-           (<= new-role ROLE-BENEFICIARY))
-      (ok (map-set roles { user: user } { role: new-role }))
-      ERR-NOT-AUTHORIZED))
+  (let ((existing-role (default-to u0 (get role (map-get? roles { user: user })))))
+    (if (and 
+          (is-eq tx-sender (var-get contract-owner))
+          (<= new-role ROLE-BENEFICIARY)
+          (not (is-eq user tx-sender))  ;; Ensure user is not setting their own role
+          (or (is-eq new-role ROLE-ADMIN)
+              (is-eq new-role ROLE-MODERATOR)
+              (is-eq new-role ROLE-BENEFICIARY)))
+        (ok (map-set roles { user: user } { role: new-role }))
+        ERR-NOT-AUTHORIZED)))
 
 (define-public (remove-role (user principal))
-  (if (is-eq tx-sender (var-get contract-owner))
+  (if (and 
+        (is-eq tx-sender (var-get contract-owner))
+        (is-some (map-get? roles { user: user }))
+        (not (is-eq user tx-sender)))  ;; Ensure user is not removing their own role
       (ok (map-delete roles { user: user }))
       ERR-NOT-AUTHORIZED))
 
@@ -97,7 +106,9 @@
 (define-public (donate (beneficiary-id uint) (amount uint))
   (let 
     ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
-    (if (> amount u0)
+    (if (and (> amount u0)
+             (< beneficiary-id (var-get beneficiary-count))  ;; Check if beneficiary-id is valid
+             (is-some (map-get? beneficiaries { id: beneficiary-id })))
         (match (stx-transfer? amount tx-sender (as-contract tx-sender))
           success (begin
             (map-set beneficiaries
@@ -113,24 +124,26 @@
 
 (define-public (add-utilization (beneficiary-id uint) (description (string-utf8 255)) (amount uint))
   (let 
-    ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND))
-     (milestone (+ (get-last-milestone beneficiary-id) u1))
-     (utilization-id (+ (var-get utilization-count) u1)))
+    ((beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
     (if (and (is-authorized tx-sender ROLE-ADMIN)
              (> (len description) u0)
-             (> amount u0))
-        (begin
-          (map-set utilization
-            { id: utilization-id }
-            { 
-              beneficiary-id: beneficiary-id, 
-              milestone: milestone, 
-              description: description, 
-              amount: amount, 
-              status: "pending" 
-            })
-          (var-set utilization-count utilization-id)
-          (ok milestone))
+             (> amount u0)
+             (< beneficiary-id (var-get beneficiary-count)))  ;; Check if beneficiary-id is valid
+        (let
+          ((milestone (+ (get-last-milestone beneficiary-id) u1))
+           (utilization-id (+ (var-get utilization-count) u1)))
+          (begin
+            (map-set utilization
+              { id: utilization-id }
+              { 
+                beneficiary-id: beneficiary-id, 
+                milestone: milestone, 
+                description: description, 
+                amount: amount, 
+                status: "pending" 
+              })
+            (var-set utilization-count utilization-id)
+            (ok milestone)))
         ERR-INVALID-INPUT)))
 
 (define-public (approve-utilization (beneficiary-id uint) (milestone uint))
@@ -138,7 +151,9 @@
     ((utilization-entry (unwrap! (map-get? utilization { id: milestone }) ERR-UTILIZATION-NOT-FOUND))
      (beneficiary (unwrap! (get-beneficiary beneficiary-id) ERR-BENEFICIARY-NOT-FOUND)))
     (if (and (is-authorized tx-sender ROLE-ADMIN)
-             (is-eq (get beneficiary-id utilization-entry) beneficiary-id))
+             (is-eq (get beneficiary-id utilization-entry) beneficiary-id)
+             (< beneficiary-id (var-get beneficiary-count))  ;; Check if beneficiary-id is valid
+             (< milestone (var-get utilization-count)))  ;; Check if milestone is valid
         (if (<= (get amount utilization-entry) (get received-amount beneficiary))
             (begin
               (map-set utilization
