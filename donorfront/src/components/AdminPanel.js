@@ -1,79 +1,105 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useWeb3 } from '../hooks/useWeb3';
+import { getBeneficiaries, registerBeneficiary, approveUtilization } from '../utils/contractHelpers';
 
 const AdminPanel = () => {
-  const [beneficiaryName, setBeneficiaryName] = useState('');
-  const [beneficiaryDescription, setBeneficiaryDescription] = useState('');
-  const [beneficiaryTargetAmount, setBeneficiaryTargetAmount] = useState('');
-  const [utilizationBeneficiaryId, setUtilizationBeneficiaryId] = useState('');
-  const [utilizationDescription, setUtilizationDescription] = useState('');
-  const [utilizationAmount, setUtilizationAmount] = useState('');
+  const [beneficiaries, setBeneficiaries] = useState([]);
+  const [newBeneficiary, setNewBeneficiary] = useState({ name: '', description: '', targetAmount: '' });
+  const [utilizationRequests, setUtilizationRequests] = useState([]);
+  const { contract, address } = useWeb3();
 
-  const handleRegisterBeneficiary = (e) => {
-    e.preventDefault();
-    // TODO: Call the register-beneficiary function from the smart contract
-    console.log('Register beneficiary:', { beneficiaryName, beneficiaryDescription, beneficiaryTargetAmount });
+  useEffect(() => {
+    fetchBeneficiaries();
+    fetchUtilizationRequests();
+  }, [contract]);
+
+  const fetchBeneficiaries = async () => {
+    if (contract) {
+      const beneficiaryList = await getBeneficiaries(contract);
+      setBeneficiaries(beneficiaryList);
+    }
   };
 
-  const handleAddUtilization = (e) => {
+  const fetchUtilizationRequests = async () => {
+    // TODO: Implement fetching utilization requests from the contract
+  };
+
+  const handleRegisterBeneficiary = async (e) => {
     e.preventDefault();
-    // TODO: Call the add-utilization function from the smart contract
-    console.log('Add utilization:', { utilizationBeneficiaryId, utilizationDescription, utilizationAmount });
+    try {
+      await registerBeneficiary(contract, address, newBeneficiary.name, newBeneficiary.description, newBeneficiary.targetAmount);
+      setNewBeneficiary({ name: '', description: '', targetAmount: '' });
+      fetchBeneficiaries();
+    } catch (error) {
+      console.error('Error registering beneficiary:', error);
+    }
+  };
+
+  const handleApproveUtilization = async (beneficiaryId, milestoneId) => {
+    try {
+      await approveUtilization(contract, address, beneficiaryId, milestoneId);
+      fetchUtilizationRequests();
+    } catch (error) {
+      console.error('Error approving utilization:', error);
+    }
   };
 
   return (
-    <div className="admin-panel">
-      <h2>Admin Panel</h2>
-      <form onSubmit={handleRegisterBeneficiary}>
-        <h3>Register Beneficiary</h3>
-        <input
-          type="text"
-          value={beneficiaryName}
-          onChange={(e) => setBeneficiaryName(e.target.value)}
-          placeholder="Name"
-          required
-        />
-        <input
-          type="text"
-          value={beneficiaryDescription}
-          onChange={(e) => setBeneficiaryDescription(e.target.value)}
-          placeholder="Description"
-          required
-        />
-        <input
-          type="number"
-          value={beneficiaryTargetAmount}
-          onChange={(e) => setBeneficiaryTargetAmount(e.target.value)}
-          placeholder="Target Amount"
-          required
-        />
-        <button type="submit">Register Beneficiary</button>
-      </form>
+    <div className="space-y-8">
+      <h1 className="text-3xl font-bold text-blue-800">Admin Panel</h1>
+      
+      <div className="bg-white shadow-md rounded-lg p-6">
+        <h2 className="text-2xl font-semibold mb-4 text-blue-700">Register New Beneficiary</h2>
+        <form onSubmit={handleRegisterBeneficiary} className="space-y-4">
+          <input
+            type="text"
+            placeholder="Beneficiary Name"
+            value={newBeneficiary.name}
+            onChange={(e) => setNewBeneficiary({...newBeneficiary, name: e.target.value})}
+            className="w-full p-2 border border-gray-300 rounded"
+            required
+          />
+          <textarea
+            placeholder="Description"
+            value={newBeneficiary.description}
+            onChange={(e) => setNewBeneficiary({...newBeneficiary, description: e.target.value})}
+            className="w-full p-2 border border-gray-300 rounded"
+            required
+          ></textarea>
+          <input
+            type="number"
+            placeholder="Target Amount"
+            value={newBeneficiary.targetAmount}
+            onChange={(e) => setNewBeneficiary({...newBeneficiary, targetAmount: e.target.value})}
+            className="w-full p-2 border border-gray-300 rounded"
+            required
+          />
+          <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 transition-colors">
+            Register Beneficiary
+          </button>
+        </form>
+      </div>
 
-      <form onSubmit={handleAddUtilization}>
-        <h3>Add Utilization</h3>
-        <input
-          type="number"
-          value={utilizationBeneficiaryId}
-          onChange={(e) => setUtilizationBeneficiaryId(e.target.value)}
-          placeholder="Beneficiary ID"
-          required
-        />
-        <input
-          type="text"
-          value={utilizationDescription}
-          onChange={(e) => setUtilizationDescription(e.target.value)}
-          placeholder="Description"
-          required
-        />
-        <input
-          type="number"
-          value={utilizationAmount}
-          onChange={(e) => setUtilizationAmount(e.target.value)}
-          placeholder="Amount"
-          required
-        />
-        <button type="submit">Add Utilization</button>
-      </form>
+      <div className="bg-white shadow-md rounded-lg p-6">
+        <h2 className="text-2xl font-semibold mb-4 text-blue-700">Utilization Requests</h2>
+        {utilizationRequests.length === 0 ? (
+          <p>No pending utilization requests.</p>
+        ) : (
+          <ul className="space-y-4">
+            {utilizationRequests.map((request) => (
+              <li key={request.id} className="flex justify-between items-center">
+                <span>{request.description} - {request.amount} STX</span>
+                <button
+                  onClick={() => handleApproveUtilization(request.beneficiaryId, request.milestoneId)}
+                  className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition-colors"
+                >
+                  Approve
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 };
