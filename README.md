@@ -47,39 +47,3 @@ Enables the admin to approve fund utilization requests.
 3. Beneficiaries can register using `register-beneficiary`.
 4. Donors can contribute using the `donate` function.
 5. The admin can track and approve fund utilization.
-
-Expected code structure for the User Interface (UI)
-
-src/
-|-- components/
-|   |-- Admin/
-|   |   |-- SetRole.js
-|   |   |-- RemoveRole.js
-|   |   |-- AddUtilization.js
-|   |   |-- ApproveUtilization.js
-|   |-- Beneficiary/
-|   |   |-- RegisterBeneficiary.js
-|   |   |-- BeneficiaryDetails.js
-|   |   |-- BeneficiaryList.js
-|   |-- Donation/
-|   |   |-- DonationForm.js
-|   |   |-- DonationList.js
-|   |-- Utilization/
-|   |   |-- UtilizationList.js
-|   |-- common/
-|   |   |-- Header.js
-|   |   |-- Footer.js
-|   |   |-- Navbar.js
-|-- contexts/
-|   |-- WalletContext.js
-|-- hooks/
-|   |-- useContract.js
-|-- pages/
-|   |-- Home.js
-|   |-- AdminDashboard.js
-|   |-- BeneficiaryDashboard.js
-|   |-- DonationPage.js
-|-- services/
-|   |-- contractInteraction.js
-|-- App.js
-|-- index.js
